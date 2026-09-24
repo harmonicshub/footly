@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "noEmit": false,
+    "outDir": "dist-server",
+    "jsx": "react"
+  },
+  "include": [
+    "odds-feed/**/*.ts",
+    "wallet/**/*.ts",
+    "pricing/**/*.ts",
+    "games/**/*.ts",
+    "markets.ts"
+  ]
+}
