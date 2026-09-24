@@ -1,0 +1,177 @@
+# =====================================================================
+# FOOTLY — LOCAL AND STAGING STACK
+# =====================================================================
+# Production should run managed Postgres and Redis (Neon/RDS, Elasticache
+# or Upstash). This file is for local development and a single-box
+# staging environment.
+#
+#   docker compose up -d
+#   docker compose exec api npm run migrate
+#   docker compose logs -f feed
+# =====================================================================
+
+name: footly
+
+services:
+
+  # -------------------------------------------------------------------
+  # Data
+  # -------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: footly
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-devonly}
+      POSTGRES_DB: footly
+    command:
+      # The ledger is write-heavy and the price cache read-heavy.
+      # These are conservative defaults for a 4GB box.
+      - postgres
+      - -c=max_connections=200
+      - -c=shared_buffers=1GB
+      - -c=effective_cache_size=3GB
+      - -c=work_mem=8MB
+      - -c=maintenance_work_mem=256MB
+      - -c=random_page_cost=1.1
+      - -c=log_min_duration_statement=500
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    ports: ["5432:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U footly"]
+      interval: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # Price cache is disposable; queues are not. appendonly protects
+    # the queues — losing a settlement job costs real money.
+    command: redis-server --appendonly yes --maxmemory 1gb --maxmemory-policy allkeys-lru
+    volumes:
+      - redisdata:/data
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 10
+
+  # -------------------------------------------------------------------
+  # Application
+  # -------------------------------------------------------------------
+  api:
+    build: { context: ., dockerfile: Dockerfile }
+    restart: unless-stopped
+    command: npm run start:api
+    environment: &env
+      NODE_ENV: ${NODE_ENV:-development}
+      DATABASE_URL: postgres://footly:${POSTGRES_PASSWORD:-devonly}@postgres:5432/footly
+      REDIS_URL: redis://redis:6379
+      # Real money stays off until licensing is in place. One flag,
+      # read at boot, gates placement, deposits and withdrawals.
+      REAL_MONEY_ENABLED: ${REAL_MONEY_ENABLED:-false}
+      PAYSTACK_SECRET_KEY: ${PAYSTACK_SECRET_KEY:-}
+      FLUTTERWAVE_SECRET_KEY: ${FLUTTERWAVE_SECRET_KEY:-}
+      FLUTTERWAVE_WEBHOOK_HASH: ${FLUTTERWAVE_WEBHOOK_HASH:-}
+      ODDS_PROVIDER: ${ODDS_PROVIDER:-betsapi}
+      ODDS_API_KEY: ${ODDS_API_KEY:-}
+      JWT_SECRET: ${JWT_SECRET:-devonly-change-me}
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    ports: ["4000:4000"]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:4000/health"]
+      interval: 10s
+      retries: 5
+
+  # The feed pipeline is a SINGLETON. Two instances consuming the same
+  # provider stream means two writers racing on the same market rows and
+  # sequence numbers that appear to gap constantly. Never scale this.
+  feed:
+    build: { context: ., dockerfile: Dockerfile }
+    restart: unless-stopped
+    command: npm run start:feed
+    environment: *env
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    deploy:
+      replicas: 1
+
+  # Socket fan-out. Scales horizontally — it only reads from Redis
+  # pub/sub and holds connections.
+  stream:
+    build: { context: ., dockerfile: Dockerfile }
+    restart: unless-stopped
+    command: npm run start:stream
+    environment: *env
+    depends_on: [redis]
+    ports: ["4001:4001"]
+
+  # Settlement, payouts, bonus expiry, reconciliation sweeps.
+  # Safe to scale — every job is idempotent.
+  worker:
+    build: { context: ., dockerfile: Dockerfile }
+    restart: unless-stopped
+    command: npm run start:worker
+    environment: *env
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    deploy:
+      replicas: 2
+
+  # Virtual rounds. Separate service so a sports feed outage cannot
+  # stop virtuals, which is where revenue continues overnight.
+  virtuals:
+    build: { context: ., dockerfile: Dockerfile }
+    restart: unless-stopped
+    command: npm run start:virtuals
+    environment: *env
+    depends_on:
+      postgres: { condition: service_healthy }
+    deploy:
+      replicas: 1
+
+  # -------------------------------------------------------------------
+  # Edge
+  # -------------------------------------------------------------------
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+    depends_on: [api, stream]
+
+  # -------------------------------------------------------------------
+  # Observability
+  # -------------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:latest
+    restart: unless-stopped
+    volumes:
+      - ./ops/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - promdata:/prometheus
+    ports: ["9090:9090"]
+
+  grafana:
+    image: grafana/grafana:latest
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+    volumes:
+      - grafanadata:/var/lib/grafana
+    ports: ["3001:3000"]
+    depends_on: [prometheus]
+
+volumes:
+  pgdata:
+  redisdata:
+  caddydata:
+  promdata:
+  grafanadata:

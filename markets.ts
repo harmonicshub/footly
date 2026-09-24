@@ -1,0 +1,1345 @@
+/**
+ * MARKET CATALOGUE
+ * ----------------
+ * Superset compiled from the market boards of SportyBet, Football.com,
+ * Stake and 1xBet. Football is exhaustive; other sports carry their
+ * standard boards.
+ *
+ * At integration time each `key` maps to your feed provider's market ID
+ * (Sportradar `market_id`, BetsAPI `id`, The Odds API `market_key`).
+ * Keep this file as the canonical internal vocabulary so a provider
+ * swap only changes the mapping table, never the app.
+ */
+
+/* ------------------------------------------------------------------ */
+/* Types                                                               */
+/* ------------------------------------------------------------------ */
+
+export type Period =
+  | "FT"      // full time (90 min, excl. ET/pens unless stated)
+  | "1H"
+  | "2H"
+  | "ET"      // extra time
+  | "PENS"
+  | "INCL_ET" // regulation + extra time
+  | "Q1" | "Q2" | "Q3" | "Q4"   // basketball
+  | "SET" | "GAME"              // tennis
+  | "INN";                      // cricket / baseball
+
+export type Shape =
+  | "2way"      // Yes/No, Over/Under, Home/Away
+  | "3way"      // Home/Draw/Away
+  | "line"      // needs a numeric line (O/U, handicap)
+  | "grid"      // correct score matrix
+  | "range"     // banded buckets (0-1, 2-3, 4-6…)
+  | "list"      // long enumerated list (scorers, minute bands)
+  | "player"    // resolved per player
+  | "combo";    // two conditions priced together
+
+export type Group =
+  | "main"
+  | "goals"
+  | "handicap"
+  | "halves"
+  | "combos"
+  | "score"
+  | "scorers"
+  | "corners"
+  | "cards"
+  | "team"
+  | "player"
+  | "timing"
+  | "method"
+  | "specials"
+  | "outright";
+
+export interface Market {
+  key: string;
+  name: string;
+  group: Group;
+  shape: Shape;
+  period: Period;
+  /** Numeric lines offered. Provider usually supplies the live set. */
+  lines?: number[];
+  /** Fixed outcome labels where the shape is enumerable. */
+  outcomes?: string[];
+  /** Plain-language settlement rule. Ships to the help centre verbatim. */
+  settlement: string;
+  live: boolean;
+  cashout: boolean;
+  /** Void if the match is abandoned before this point. */
+  voidBefore?: Period;
+}
+
+/* ------------------------------------------------------------------ */
+/* Shared line sets                                                    */
+/* ------------------------------------------------------------------ */
+
+const GOAL_LINES = [0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5];
+const HALF_GOAL_LINES = [0.5, 1.5, 2.5, 3.5];
+const TEAM_GOAL_LINES = [0.5, 1.5, 2.5, 3.5, 4.5];
+const AH_LINES = [
+  -3, -2.75, -2.5, -2.25, -2, -1.75, -1.5, -1.25, -1, -0.75, -0.5, -0.25,
+  0, 0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 2.75, 3,
+];
+const EH_LINES = [-3, -2, -1, 1, 2, 3];
+const CORNER_LINES = [6.5, 7.5, 8.5, 9.5, 10.5, 11.5, 12.5, 13.5, 14.5];
+const CARD_LINES = [1.5, 2.5, 3.5, 4.5, 5.5, 6.5];
+const BOOKING_PTS_LINES = [15.5, 25.5, 35.5, 45.5, 55.5, 65.5];
+
+/* ------------------------------------------------------------------ */
+/* FOOTBALL                                                            */
+/* ------------------------------------------------------------------ */
+
+export const FOOTBALL_MARKETS: Market[] = [
+  /* ---------------- Main ---------------- */
+  {
+    key: "1x2",
+    name: "1X2 (Match result)",
+    group: "main",
+    shape: "3way",
+    period: "FT",
+    outcomes: ["Home", "Draw", "Away"],
+    settlement: "Result after 90 minutes plus stoppage time. Extra time and penalties do not count.",
+    live: true,
+    cashout: true,
+  },
+  {
+    key: "dc",
+    name: "Double chance",
+    group: "main",
+    shape: "3way",
+    period: "FT",
+    outcomes: ["1X", "12", "X2"],
+    settlement: "Covers two of the three results. Wins if either lands after 90 minutes.",
+    live: true,
+    cashout: true,
+  },
+  {
+    key: "dnb",
+    name: "Draw no bet",
+    group: "main",
+    shape: "2way",
+    period: "FT",
+    outcomes: ["Home", "Away"],
+    settlement: "Pick the winner. Stake is returned in full if the match is drawn.",
+    live: true,
+    cashout: true,
+  },
+  {
+    key: "to_qualify",
+    name: "To qualify",
+    group: "main",
+    shape: "2way",
+    period: "INCL_ET",
+    outcomes: ["Home", "Away"],
+    settlement: "Team that advances to the next round, including extra time and penalties.",
+    live: true,
+    cashout: false,
+  },
+  {
+    key: "outright_winner",
+    name: "Winner (incl. extra time and penalties)",
+    group: "main",
+    shape: "2way",
+    period: "INCL_ET",
+    outcomes: ["Home", "Away"],
+    settlement: "Team that wins the tie by any route, penalties included.",
+    live: true,
+    cashout: true,
+  },
+
+  /* ---------------- Goals ---------------- */
+  {
+    key: "ou_goals",
+    name: "Total goals over/under",
+    group: "goals",
+    shape: "line",
+    period: "FT",
+    lines: GOAL_LINES,
+    outcomes: ["Over", "Under"],
+    settlement: "Total goals scored by both teams in 90 minutes against the line.",
+    live: true,
+    cashout: true,
+  },
+  {
+    key: "ah_goals",
+    name: "Asian total goals",
+    group: "goals",
+    shape: "line",
+    period: "FT",
+    lines: [1.75, 2, 2.25, 2.75, 3, 3.25],
+    outcomes: ["Over", "Under"],
+    settlement: "Quarter lines split the stake across two lines. Whole lines push and refund on an exact hit.",
+    live: true,
+    cashout: true,
+  },
+  {
+    key: "btts",
+    name: "Both teams to score",
+    group: "goals",
+    shape: "2way",
+    period: "FT",
+    outcomes: ["Yes", "No"],
+    settlement: "Both sides must score at least once in 90 minutes.",
+    live: true,
+    cashout: true,
+  },
+  {
+    key: "goal_range",
+    name: "Total goals range",
+    group: "goals",
+    shape: "range",
+    period: "FT",
+    outcomes: ["0-1", "2-3", "4-6", "7+"],
+    settlement: "Total match goals must fall inside the selected band.",
+    live: true,
+    cashout: true,
+  },
+  {
+    key: "exact_goals",
+    name: "Exact total goals",
+    group: "goals",
+    shape: "list",
+    period: "FT",
+    outcomes: ["0", "1", "2", "3", "4", "5", "6", "7+"],
+    settlement: "Exact number of goals in the match.",
+    live: true,
+    cashout: true,
+  },
+  {
+    key: "odd_even_goals",
+    name: "Odd/even goals",
+    group: "goals",
+    shape: "2way",
+    period: "FT",
+    outcomes: ["Odd", "Even"],
+    settlement: "0-0 settles as Even.",
+    live: true,
+    cashout: true,
+  },
+  {
+    key: "goal_both_halves",
+    name: "Goal in both halves",
+    group: "goals",
+    shape: "2way",
+    period: "FT",
+    outcomes: ["Yes", "No"],
+    settlement: "At least one goal by either team in each half.",
+    live: true,
+    cashout: true,
+  },
+  {
+    key: "highest_scoring_half",
+    name: "Highest scoring half",
+    group: "goals",
+    shape: "3way",
+    period: "FT",
+    outcomes: ["1st half", "2nd half", "Equal"],
+    settlement: "Half with more total goals. Equal covers identical counts, including 0-0.",
+    live: true,
+    cashout: true,
+  },
+  {
+    key: "clean_sheet",
+    name: "Clean sheet",
+    group: "goals",
+    shape: "2way",
+    period: "FT",
+    outcomes: ["Home yes", "Home no", "Away yes", "Away no"],
+    settlement: "Selected team must concede zero goals.",
+    live: true,
+    cashout: true,
+  },
+  {
+    key: "win_to_nil",
+    name: "Win to nil",
+    group: "goals",
+    shape: "2way",
+    period: "FT",
+    outcomes: ["Home", "Away"],
+    settlement: "Selected team wins without conceding.",
+    live: true,
+    cashout: true,
+  },
+  {
+    key: "winning_margin",
+    name: "Winning margin",
+    group: "goals",
+    shape: "list",
+    period: "FT",
+    outcomes: [
+      "Home by 1", "Home by 2", "Home by 3+",
+      "Draw",
+      "Away by 1", "Away by 2", "Away by 3+",
+    ],
+    settlement: "Goal difference and the team achieving it.",
+    live: true,
+    cashout: true,
+  },
+
+  /* ---------------- Handicaps ---------------- */
+  {
+    key: "ah",
+    name: "Asian handicap",
+    group: "handicap",
+    shape: "line",
+    period: "FT",
+    lines: AH_LINES,
+    outcomes: ["Home", "Away"],
+    settlement: "Handicap is applied to the final score. Whole lines refund on an exact tie; quarter lines split the stake.",
+    live: true,
+    cashout: true,
+  },
+  {
+    key: "eh",
+    name: "European handicap (3-way)",
+    group: "handicap",
+    shape: "line",
+    period: "FT",
+    lines: EH_LINES,
+    outcomes: ["Home", "Draw", "Away"],
+    settlement: "Whole-goal head start with a draw option. No refunds.",
+    live: true,
+    cashout: true,
+  },
+  {
+    key: "ah_1h",
+    name: "Asian handicap — 1st half",
+    group: "handicap",
+    shape: "line",
+    period: "1H",
+    lines: AH_LINES.filter((l) => Math.abs(l) <= 2),
+    outcomes: ["Home", "Away"],
+    settlement: "As Asian handicap, settled on the half-time score only.",
+    live: true,
+    cashout: true,
+    voidBefore: "1H",
+  },
+
+  /* ---------------- Halves ---------------- */
+  {
+    key: "1x2_1h",
+    name: "1X2 — 1st half",
+    group: "halves",
+    shape: "3way",
+    period: "1H",
+    outcomes: ["Home", "Draw", "Away"],
+    settlement: "Score at half time.",
+    live: true,
+    cashout: true,
+    voidBefore: "1H",
+  },
+  {
+    key: "1x2_2h",
+    name: "1X2 — 2nd half",
+    group: "halves",
+    shape: "3way",
+    period: "2H",
+    outcomes: ["Home", "Draw", "Away"],
+    settlement: "Goals scored in the second half only. First-half goals are ignored.",
+    live: true,
+    cashout: true,
+  },
+  {
+    key: "ht_ft",
+    name: "Half time / full time",
+    group: "halves",
+    shape: "list",
+    period: "FT",
+    outcomes: ["1/1", "1/X", "1/2", "X/1", "X/X", "X/2", "2/1", "2/X", "2/2"],
+    settlement: "Leader at half time paired with the full-time result. Both legs must land.",
+    live: true,
+    cashout: true,
+  },
+  {
+    key: "ou_goals_1h",
+    name: "Total goals over/under — 1st half",
+    group: "halves",
+    shape: "line",
+    period: "1H",
+    lines: HALF_GOAL_LINES,
+    outcomes: ["Over", "Under"],
+    settlement: "Goals before half time against the line.",
+    live: true,
+    cashout: true,
+    voidBefore: "1H",
+  },
+  {
+    key: "ou_goals_2h",
+    name: "Total goals over/under — 2nd half",
+    group: "halves",
+    shape: "line",
+    period: "2H",
+    lines: HALF_GOAL_LINES,
+    outcomes: ["Over", "Under"],
+    settlement: "Second-half goals only.",
+    live: true,
+    cashout: true,
+  },
+  {
+    key: "btts_1h",
+    name: "Both teams to score — 1st half",
+    group: "halves",
+    shape: "2way",
+    period: "1H",
+    outcomes: ["Yes", "No"],
+    settlement: "Both teams score before half time.",
+    live: true,
+    cashout: true,
+    voidBefore: "1H",
+  },
+  {
+    key: "btts_both_halves",
+    name: "Both teams to score in both halves",
+    group: "halves",
+    shape: "2way",
+    period: "FT",
+    outcomes: ["Yes", "No"],
+    settlement: "Each team scores in the first half and again in the second.",
+    live: true,
+    cashout: true,
+  },
+
+  /* ---------------- Combination markets ---------------- */
+  {
+    key: "1x2_btts",
+    name: "Result and both teams to score",
+    group: "combos",
+    shape: "combo",
+    period: "FT",
+    outcomes: [
+      "Home & Yes", "Home & No",
+      "Draw & Yes", "Draw & No",
+      "Away & Yes", "Away & No",
+    ],
+    settlement: "Both conditions must be true at full time.",
+    live: true,
+    cashout: true,
+  },
+  {
+    key: "1x2_ou",
+    name: "Result and total goals",
+    group: "combos",
+    shape: "combo",
+    period: "FT",
+    lines: [1.5, 2.5, 3.5, 4.5],
+    outcomes: ["Home & Over", "Home & Under", "Draw & Over", "Draw & Under", "Away & Over", "Away & Under"],
+    settlement: "Match result combined with the goals line. Both legs must land.",
+    live: true,
+    cashout: true,
+  },
+  {
+    key: "dc_btts",
+    name: "Double chance and both teams to score",
+    group: "combos",
+    shape: "combo",
+    period: "FT",
+    outcomes: ["1X & Yes", "1X & No", "12 & Yes", "12 & No", "X2 & Yes", "X2 & No"],
+    settlement: "Double chance leg and the BTTS leg must both land.",
+    live: true,
+    cashout: true,
+  },
+  {
+    key: "dc_ou",
+    name: "Double chance and total goals",
+    group: "combos",
+    shape: "combo",
+    period: "FT",
+    lines: [1.5, 2.5, 3.5],
+    outcomes: ["1X & Over", "1X & Under", "12 & Over", "12 & Under", "X2 & Over", "X2 & Under"],
+    settlement: "Both legs must land.",
+    live: true,
+    cashout: true,
+  },
+  {
+    key: "btts_ou",
+    name: "Both teams to score and total goals",
+    group: "combos",
+    shape: "combo",
+    period: "FT",
+    lines: [2.5, 3.5],
+    outcomes: ["Yes & Over", "Yes & Under", "No & Over", "No & Under"],
+    settlement: "Both legs must land.",
+    live: true,
+    cashout: true,
+  },
+  {
+    key: "multigoal",
+    name: "Multigoal",
+    group: "combos",
+    shape: "range",
+    period: "FT",
+    outcomes: ["1-2", "1-3", "1-4", "2-3", "2-4", "2-5", "3-4", "3-5", "3-6", "4-6"],
+    settlement: "Total match goals inside the selected band, inclusive.",
+    live: true,
+    cashout: true,
+  },
+
+  /* ---------------- Correct score ---------------- */
+  {
+    key: "correct_score",
+    name: "Correct score",
+    group: "score",
+    shape: "grid",
+    period: "FT",
+    settlement: "Exact final score after 90 minutes. Scores beyond the priced grid settle as 'Any other'.",
+    live: true,
+    cashout: true,
+  },
+  {
+    key: "correct_score_1h",
+    name: "Correct score — 1st half",
+    group: "score",
+    shape: "grid",
+    period: "1H",
+    settlement: "Exact score at half time.",
+    live: true,
+    cashout: true,
+    voidBefore: "1H",
+  },
+  {
+    key: "half_scores",
+    name: "Half-time / full-time correct score",
+    group: "score",
+    shape: "grid",
+    period: "FT",
+    settlement: "Both the half-time and full-time scorelines must be exact.",
+    live: false,
+    cashout: false,
+  },
+  {
+    key: "bore_draw",
+    name: "Bore draw",
+    group: "score",
+    shape: "2way",
+    period: "FT",
+    outcomes: ["Yes", "No"],
+    settlement: "Match finishes 0-0.",
+    live: true,
+    cashout: true,
+  },
+
+  /* ---------------- Goalscorers ---------------- */
+  {
+    key: "first_scorer",
+    name: "First goalscorer",
+    group: "scorers",
+    shape: "player",
+    period: "FT",
+    settlement: "First player to score. Own goals do not count and are ignored for settlement. Stake is refunded if the player starts on the bench and the first goal is scored before they come on.",
+    live: false,
+    cashout: false,
+  },
+  {
+    key: "last_scorer",
+    name: "Last goalscorer",
+    group: "scorers",
+    shape: "player",
+    period: "FT",
+    settlement: "Last player to score. Own goals do not count.",
+    live: false,
+    cashout: false,
+  },
+  {
+    key: "anytime_scorer",
+    name: "Anytime goalscorer",
+    group: "scorers",
+    shape: "player",
+    period: "FT",
+    settlement: "Player scores at any point in 90 minutes. Own goals do not count. Void if the player takes no part in the match.",
+    live: true,
+    cashout: true,
+  },
+  {
+    key: "scorer_2plus",
+    name: "Player to score 2 or more",
+    group: "scorers",
+    shape: "player",
+    period: "FT",
+    settlement: "Player scores at least twice.",
+    live: true,
+    cashout: true,
+  },
+  {
+    key: "scorer_hattrick",
+    name: "Player to score a hat-trick",
+    group: "scorers",
+    shape: "player",
+    period: "FT",
+    settlement: "Player scores three or more goals.",
+    live: true,
+    cashout: false,
+  },
+  {
+    key: "scorer_and_result",
+    name: "Goalscorer and result",
+    group: "scorers",
+    shape: "combo",
+    period: "FT",
+    settlement: "Named player scores and the selected match result lands.",
+    live: false,
+    cashout: false,
+  },
+  {
+    key: "team_first_scorer",
+    name: "First team to score",
+    group: "scorers",
+    shape: "3way",
+    period: "FT",
+    outcomes: ["Home", "Away", "No goal"],
+    settlement: "Team that opens the scoring. Own goals count for the benefiting team.",
+    live: true,
+    cashout: true,
+  },
+  {
+    key: "team_last_scorer",
+    name: "Last team to score",
+    group: "scorers",
+    shape: "3way",
+    period: "FT",
+    outcomes: ["Home", "Away", "No goal"],
+    settlement: "Team that scores the final goal.",
+    live: true,
+    cashout: true,
+  },
+
+  /* ---------------- Team totals ---------------- */
+  {
+    key: "team_ou",
+    name: "Team total goals over/under",
+    group: "team",
+    shape: "line",
+    period: "FT",
+    lines: TEAM_GOAL_LINES,
+    outcomes: ["Home over", "Home under", "Away over", "Away under"],
+    settlement: "Goals scored by the selected team only.",
+    live: true,
+    cashout: true,
+  },
+  {
+    key: "team_exact",
+    name: "Team exact goals",
+    group: "team",
+    shape: "list",
+    period: "FT",
+    outcomes: ["0", "1", "2", "3", "4+"],
+    settlement: "Exact goals for the selected team.",
+    live: true,
+    cashout: true,
+  },
+  {
+    key: "team_odd_even",
+    name: "Team odd/even goals",
+    group: "team",
+    shape: "2way",
+    period: "FT",
+    outcomes: ["Odd", "Even"],
+    settlement: "Zero settles as Even.",
+    live: true,
+    cashout: true,
+  },
+  {
+    key: "team_score_both_halves",
+    name: "Team to score in both halves",
+    group: "team",
+    shape: "2way",
+    period: "FT",
+    outcomes: ["Yes", "No"],
+    settlement: "Selected team scores in each half.",
+    live: true,
+    cashout: true,
+  },
+  {
+    key: "team_win_both_halves",
+    name: "Team to win both halves",
+    group: "team",
+    shape: "2way",
+    period: "FT",
+    outcomes: ["Yes", "No"],
+    settlement: "Selected team outscores the opponent in the first half and again in the second.",
+    live: true,
+    cashout: true,
+  },
+  {
+    key: "team_win_either_half",
+    name: "Team to win either half",
+    group: "team",
+    shape: "2way",
+    period: "FT",
+    outcomes: ["Yes", "No"],
+    settlement: "Selected team wins at least one half.",
+    live: true,
+    cashout: true,
+  },
+  {
+    key: "team_come_from_behind",
+    name: "Team to come from behind and win",
+    group: "team",
+    shape: "2way",
+    period: "FT",
+    outcomes: ["Yes", "No"],
+    settlement: "Selected team trails at some point and still wins in 90 minutes.",
+    live: true,
+    cashout: true,
+  },
+
+  /* ---------------- Corners ---------------- */
+  {
+    key: "corners_ou",
+    name: "Total corners over/under",
+    group: "corners",
+    shape: "line",
+    period: "FT",
+    lines: CORNER_LINES,
+    outcomes: ["Over", "Under"],
+    settlement: "Corners awarded, not corners taken. A corner awarded but not taken still counts.",
+    live: true,
+    cashout: true,
+  },
+  {
+    key: "corners_1x2",
+    name: "Corners 3-way",
+    group: "corners",
+    shape: "3way",
+    period: "FT",
+    outcomes: ["Home", "Tie", "Away"],
+    settlement: "Team with more corners at full time.",
+    live: true,
+    cashout: true,
+  },
+  {
+    key: "corners_ah",
+    name: "Corner handicap",
+    group: "corners",
+    shape: "line",
+    period: "FT",
+    lines: [-4.5, -3.5, -2.5, -1.5, 1.5, 2.5, 3.5, 4.5],
+    outcomes: ["Home", "Away"],
+    settlement: "Handicap applied to the corner count.",
+    live: true,
+    cashout: true,
+  },
+  {
+    key: "corners_range",
+    name: "Corners range",
+    group: "corners",
+    shape: "range",
+    period: "FT",
+    outcomes: ["0-6", "7-8", "9-10", "11-12", "13+"],
+    settlement: "Total corners inside the band.",
+    live: true,
+    cashout: true,
+  },
+  {
+    key: "corners_team_ou",
+    name: "Team corners over/under",
+    group: "corners",
+    shape: "line",
+    period: "FT",
+    lines: [2.5, 3.5, 4.5, 5.5, 6.5, 7.5],
+    outcomes: ["Over", "Under"],
+    settlement: "Corners awarded to the selected team only.",
+    live: true,
+    cashout: true,
+  },
+  {
+    key: "corners_1h_ou",
+    name: "1st half corners over/under",
+    group: "corners",
+    shape: "line",
+    period: "1H",
+    lines: [2.5, 3.5, 4.5, 5.5, 6.5],
+    outcomes: ["Over", "Under"],
+    settlement: "Corners before half time.",
+    live: true,
+    cashout: true,
+    voidBefore: "1H",
+  },
+  {
+    key: "first_corner",
+    name: "First corner",
+    group: "corners",
+    shape: "3way",
+    period: "FT",
+    outcomes: ["Home", "Away", "No corner"],
+    settlement: "Team awarded the first corner.",
+    live: true,
+    cashout: false,
+  },
+  {
+    key: "last_corner",
+    name: "Last corner",
+    group: "corners",
+    shape: "3way",
+    period: "FT",
+    outcomes: ["Home", "Away", "No corner"],
+    settlement: "Team awarded the final corner.",
+    live: true,
+    cashout: false,
+  },
+  {
+    key: "corner_race",
+    name: "Corner race",
+    group: "corners",
+    shape: "3way",
+    period: "FT",
+    lines: [3, 5, 7, 9],
+    outcomes: ["Home", "Away", "Neither"],
+    settlement: "First team to reach the stated number of corners.",
+    live: true,
+    cashout: true,
+  },
+  {
+    key: "corners_odd_even",
+    name: "Corners odd/even",
+    group: "corners",
+    shape: "2way",
+    period: "FT",
+    outcomes: ["Odd", "Even"],
+    settlement: "Zero settles as Even.",
+    live: true,
+    cashout: true,
+  },
+  {
+    key: "multicorners",
+    name: "Multicorners",
+    group: "corners",
+    shape: "line",
+    period: "FT",
+    lines: [20.5, 24.5, 28.5, 32.5],
+    outcomes: ["Over", "Under"],
+    settlement: "First-half corners multiplied by second-half corners, compared to the line.",
+    live: false,
+    cashout: false,
+  },
+
+  /* ---------------- Cards ---------------- */
+  {
+    key: "cards_ou",
+    name: "Total cards over/under",
+    group: "cards",
+    shape: "line",
+    period: "FT",
+    lines: CARD_LINES,
+    outcomes: ["Over", "Under"],
+    settlement: "Yellow counts as one, red as two. A second yellow leading to a red adds one card only, for three in total.",
+    live: true,
+    cashout: true,
+  },
+  {
+    key: "booking_points",
+    name: "Booking points",
+    group: "cards",
+    shape: "line",
+    period: "FT",
+    lines: BOOKING_PTS_LINES,
+    outcomes: ["Over", "Under"],
+    settlement: "Yellow = 10 points, red = 25 points. Cards shown to non-players after the final whistle do not count.",
+    live: true,
+    cashout: true,
+  },
+  {
+    key: "cards_1x2",
+    name: "Cards 3-way",
+    group: "cards",
+    shape: "3way",
+    period: "FT",
+    outcomes: ["Home", "Tie", "Away"],
+    settlement: "Team shown more cards.",
+    live: true,
+    cashout: true,
+  },
+  {
+    key: "cards_ah",
+    name: "Card handicap",
+    group: "cards",
+    shape: "line",
+    period: "FT",
+    lines: [-2.5, -1.5, -0.5, 0.5, 1.5, 2.5],
+    outcomes: ["Home", "Away"],
+    settlement: "Handicap applied to the card count.",
+    live: true,
+    cashout: true,
+  },
+  {
+    key: "cards_team_ou",
+    name: "Team cards over/under",
+    group: "cards",
+    shape: "line",
+    period: "FT",
+    lines: [0.5, 1.5, 2.5, 3.5],
+    outcomes: ["Over", "Under"],
+    settlement: "Cards shown to the selected team only.",
+    live: true,
+    cashout: true,
+  },
+  {
+    key: "red_card",
+    name: "Red card in match",
+    group: "cards",
+    shape: "2way",
+    period: "FT",
+    outcomes: ["Yes", "No"],
+    settlement: "At least one red card, straight or second yellow, during 90 minutes.",
+    live: true,
+    cashout: true,
+  },
+  {
+    key: "first_card",
+    name: "First card",
+    group: "cards",
+    shape: "3way",
+    period: "FT",
+    outcomes: ["Home", "Away", "No card"],
+    settlement: "Team shown the first card. Simultaneous cards void the market.",
+    live: true,
+    cashout: false,
+  },
+  {
+    key: "player_card",
+    name: "Player to be carded",
+    group: "cards",
+    shape: "player",
+    period: "FT",
+    settlement: "Named player shown a yellow or red. Void if the player does not appear.",
+    live: true,
+    cashout: false,
+  },
+
+  /* ---------------- Player props ---------------- */
+  {
+    key: "player_shots",
+    name: "Player shots",
+    group: "player",
+    shape: "line",
+    period: "FT",
+    lines: [0.5, 1.5, 2.5, 3.5, 4.5],
+    outcomes: ["Over", "Under"],
+    settlement: "Shots on and off target, blocked shots excluded. Void if the player does not appear.",
+    live: false,
+    cashout: false,
+  },
+  {
+    key: "player_shots_target",
+    name: "Player shots on target",
+    group: "player",
+    shape: "line",
+    period: "FT",
+    lines: [0.5, 1.5, 2.5, 3.5],
+    outcomes: ["Over", "Under"],
+    settlement: "Shots on target per the official feed. Blocked shots do not count.",
+    live: false,
+    cashout: false,
+  },
+  {
+    key: "player_assists",
+    name: "Player assists",
+    group: "player",
+    shape: "line",
+    period: "FT",
+    lines: [0.5, 1.5],
+    outcomes: ["Over", "Under"],
+    settlement: "Assists per the official feed.",
+    live: false,
+    cashout: false,
+  },
+  {
+    key: "player_passes",
+    name: "Player passes completed",
+    group: "player",
+    shape: "line",
+    period: "FT",
+    lines: [24.5, 34.5, 44.5, 54.5, 64.5],
+    outcomes: ["Over", "Under"],
+    settlement: "Completed passes per the official feed.",
+    live: false,
+    cashout: false,
+  },
+  {
+    key: "player_tackles",
+    name: "Player tackles",
+    group: "player",
+    shape: "line",
+    period: "FT",
+    lines: [0.5, 1.5, 2.5, 3.5],
+    outcomes: ["Over", "Under"],
+    settlement: "Successful tackles per the official feed.",
+    live: false,
+    cashout: false,
+  },
+  {
+    key: "player_fouls",
+    name: "Player fouls committed",
+    group: "player",
+    shape: "line",
+    period: "FT",
+    lines: [0.5, 1.5, 2.5],
+    outcomes: ["Over", "Under"],
+    settlement: "Fouls conceded per the official feed.",
+    live: false,
+    cashout: false,
+  },
+  {
+    key: "player_offsides",
+    name: "Player offsides",
+    group: "player",
+    shape: "line",
+    period: "FT",
+    lines: [0.5, 1.5],
+    outcomes: ["Over", "Under"],
+    settlement: "Offside calls against the named player.",
+    live: false,
+    cashout: false,
+  },
+  {
+    key: "gk_saves",
+    name: "Goalkeeper saves",
+    group: "player",
+    shape: "line",
+    period: "FT",
+    lines: [1.5, 2.5, 3.5, 4.5, 5.5],
+    outcomes: ["Over", "Under"],
+    settlement: "Saves per the official feed. Void if the keeper does not start.",
+    live: false,
+    cashout: false,
+  },
+  {
+    key: "player_to_start",
+    name: "Player to start",
+    group: "player",
+    shape: "player",
+    period: "FT",
+    settlement: "Named player in the starting eleven at kick-off.",
+    live: false,
+    cashout: false,
+  },
+
+  /* ---------------- Timing ---------------- */
+  {
+    key: "first_goal_time",
+    name: "Time of first goal",
+    group: "timing",
+    shape: "range",
+    period: "FT",
+    outcomes: ["0-10", "11-20", "21-30", "31-40", "41-50", "51-60", "61-70", "71-80", "81-90+", "No goal"],
+    settlement: "Minute band containing the opening goal. Stoppage time in the first half counts as minute 45.",
+    live: true,
+    cashout: false,
+  },
+  {
+    key: "goal_before",
+    name: "Goal before minute",
+    group: "timing",
+    shape: "line",
+    period: "FT",
+    lines: [10, 20, 30, 45, 60, 75],
+    outcomes: ["Yes", "No"],
+    settlement: "At least one goal scored before the stated minute.",
+    live: true,
+    cashout: true,
+  },
+  {
+    key: "goal_in_interval",
+    name: "Goal in 15-minute interval",
+    group: "timing",
+    shape: "range",
+    period: "FT",
+    outcomes: ["1-15", "16-30", "31-45+", "46-60", "61-75", "76-90+"],
+    settlement: "At least one goal inside the interval.",
+    live: true,
+    cashout: true,
+  },
+  {
+    key: "race_to_goals",
+    name: "Race to goals",
+    group: "timing",
+    shape: "3way",
+    period: "FT",
+    lines: [1, 2, 3],
+    outcomes: ["Home", "Away", "Neither"],
+    settlement: "First team to reach the stated goal count.",
+    live: true,
+    cashout: true,
+  },
+  {
+    key: "next_goal",
+    name: "Next goal",
+    group: "timing",
+    shape: "3way",
+    period: "FT",
+    outcomes: ["Home", "Away", "No goal"],
+    settlement: "Team scoring the next goal from the moment the bet is accepted. In-play only.",
+    live: true,
+    cashout: false,
+  },
+
+  /* ---------------- Method and specials ---------------- */
+  {
+    key: "penalty_awarded",
+    name: "Penalty awarded",
+    group: "method",
+    shape: "2way",
+    period: "FT",
+    outcomes: ["Yes", "No"],
+    settlement: "A penalty is awarded, whether or not it is scored.",
+    live: true,
+    cashout: true,
+  },
+  {
+    key: "penalty_scored",
+    name: "Penalty scored",
+    group: "method",
+    shape: "2way",
+    period: "FT",
+    outcomes: ["Yes", "No"],
+    settlement: "A penalty is converted in 90 minutes.",
+    live: true,
+    cashout: true,
+  },
+  {
+    key: "own_goal",
+    name: "Own goal in match",
+    group: "method",
+    shape: "2way",
+    period: "FT",
+    outcomes: ["Yes", "No"],
+    settlement: "At least one own goal.",
+    live: true,
+    cashout: false,
+  },
+  {
+    key: "goal_method",
+    name: "Method of first goal",
+    group: "method",
+    shape: "list",
+    period: "FT",
+    outcomes: ["Shot", "Header", "Penalty", "Free kick", "Own goal", "No goal"],
+    settlement: "How the opening goal is scored, per the official feed.",
+    live: false,
+    cashout: false,
+  },
+  {
+    key: "var_review",
+    name: "VAR review in match",
+    group: "specials",
+    shape: "2way",
+    period: "FT",
+    outcomes: ["Yes", "No"],
+    settlement: "An on-field decision is formally reviewed.",
+    live: true,
+    cashout: false,
+  },
+  {
+    key: "substitutions_ou",
+    name: "Total substitutions",
+    group: "specials",
+    shape: "line",
+    period: "FT",
+    lines: [7.5, 8.5, 9.5, 10.5],
+    outcomes: ["Over", "Under"],
+    settlement: "Substitutions made by both teams in 90 minutes.",
+    live: true,
+    cashout: false,
+  },
+  {
+    key: "offsides_ou",
+    name: "Total offsides",
+    group: "specials",
+    shape: "line",
+    period: "FT",
+    lines: [1.5, 2.5, 3.5, 4.5, 5.5],
+    outcomes: ["Over", "Under"],
+    settlement: "Offside calls against both teams.",
+    live: true,
+    cashout: false,
+  },
+  {
+    key: "throwins_ou",
+    name: "Total throw-ins",
+    group: "specials",
+    shape: "line",
+    period: "FT",
+    lines: [28.5, 32.5, 36.5, 40.5],
+    outcomes: ["Over", "Under"],
+    settlement: "Throw-ins awarded to both teams.",
+    live: true,
+    cashout: false,
+  },
+  {
+    key: "fouls_ou",
+    name: "Total fouls",
+    group: "specials",
+    shape: "line",
+    period: "FT",
+    lines: [18.5, 21.5, 24.5, 27.5],
+    outcomes: ["Over", "Under"],
+    settlement: "Fouls conceded by both teams.",
+    live: true,
+    cashout: false,
+  },
+  {
+    key: "shots_ou",
+    name: "Total shots",
+    group: "specials",
+    shape: "line",
+    period: "FT",
+    lines: [20.5, 23.5, 26.5, 29.5],
+    outcomes: ["Over", "Under"],
+    settlement: "Shots by both teams per the official feed.",
+    live: true,
+    cashout: false,
+  },
+
+  /* ---------------- Outrights ---------------- */
+  {
+    key: "outright_league",
+    name: "League winner",
+    group: "outright",
+    shape: "list",
+    period: "FT",
+    settlement: "Team crowned champion at the end of the season. Settled on the official final table.",
+    live: false,
+    cashout: false,
+  },
+  {
+    key: "outright_topfour",
+    name: "Top four finish",
+    group: "outright",
+    shape: "2way",
+    period: "FT",
+    outcomes: ["Yes", "No"],
+    settlement: "Team finishes in the top four of the final table.",
+    live: false,
+    cashout: false,
+  },
+  {
+    key: "outright_relegation",
+    name: "To be relegated",
+    group: "outright",
+    shape: "2way",
+    period: "FT",
+    outcomes: ["Yes", "No"],
+    settlement: "Team relegated on sporting merit. Administrative demotions do not count.",
+    live: false,
+    cashout: false,
+  },
+  {
+    key: "outright_topscorer",
+    name: "Top goalscorer",
+    group: "outright",
+    shape: "player",
+    period: "FT",
+    settlement: "Most league goals over the season. Dead heat rules apply to ties.",
+    live: false,
+    cashout: false,
+  },
+];
+
+/* ------------------------------------------------------------------ */
+/* BASKETBALL                                                          */
+/* ------------------------------------------------------------------ */
+
+export const BASKETBALL_MARKETS: Market[] = [
+  { key: "bb_ml", name: "Moneyline", group: "main", shape: "2way", period: "INCL_ET", outcomes: ["Home", "Away"], settlement: "Winner including overtime.", live: true, cashout: true },
+  { key: "bb_spread", name: "Point spread", group: "handicap", shape: "line", period: "INCL_ET", outcomes: ["Home", "Away"], settlement: "Spread applied to the final score, overtime included.", live: true, cashout: true },
+  { key: "bb_total", name: "Total points", group: "goals", shape: "line", period: "INCL_ET", outcomes: ["Over", "Under"], settlement: "Combined points, overtime included.", live: true, cashout: true },
+  { key: "bb_team_total", name: "Team total points", group: "team", shape: "line", period: "INCL_ET", outcomes: ["Over", "Under"], settlement: "Points for the selected team.", live: true, cashout: true },
+  { key: "bb_quarter_ml", name: "Quarter winner", group: "halves", shape: "3way", period: "Q1", outcomes: ["Home", "Tie", "Away"], settlement: "Points scored in that quarter only.", live: true, cashout: true },
+  { key: "bb_half_total", name: "Half total points", group: "halves", shape: "line", period: "1H", outcomes: ["Over", "Under"], settlement: "Points in the selected half.", live: true, cashout: true },
+  { key: "bb_race", name: "Race to points", group: "timing", shape: "2way", period: "INCL_ET", lines: [10, 20, 30, 50], outcomes: ["Home", "Away"], settlement: "First team to reach the stated total.", live: true, cashout: true },
+  { key: "bb_odd_even", name: "Odd/even points", group: "goals", shape: "2way", period: "INCL_ET", outcomes: ["Odd", "Even"], settlement: "Parity of the combined score.", live: true, cashout: true },
+  { key: "bb_player_points", name: "Player points", group: "player", shape: "line", period: "INCL_ET", outcomes: ["Over", "Under"], settlement: "Points scored by the named player. Void if they do not play.", live: false, cashout: false },
+  { key: "bb_player_rebounds", name: "Player rebounds", group: "player", shape: "line", period: "INCL_ET", outcomes: ["Over", "Under"], settlement: "Total rebounds, offensive and defensive.", live: false, cashout: false },
+  { key: "bb_player_assists", name: "Player assists", group: "player", shape: "line", period: "INCL_ET", outcomes: ["Over", "Under"], settlement: "Assists per the official box score.", live: false, cashout: false },
+  { key: "bb_player_pra", name: "Player points + rebounds + assists", group: "player", shape: "line", period: "INCL_ET", outcomes: ["Over", "Under"], settlement: "Sum of the three categories.", live: false, cashout: false },
+  { key: "bb_player_threes", name: "Player three-pointers made", group: "player", shape: "line", period: "INCL_ET", outcomes: ["Over", "Under"], settlement: "Three-point field goals made.", live: false, cashout: false },
+];
+
+/* ------------------------------------------------------------------ */
+/* TENNIS                                                              */
+/* ------------------------------------------------------------------ */
+
+export const TENNIS_MARKETS: Market[] = [
+  { key: "tn_ml", name: "Match winner", group: "main", shape: "2way", period: "FT", outcomes: ["Player 1", "Player 2"], settlement: "Winner of the match. Retirement before completion voids unless the match is officially awarded.", live: true, cashout: true },
+  { key: "tn_set_hcp", name: "Set handicap", group: "handicap", shape: "line", period: "FT", lines: [-2.5, -1.5, 1.5, 2.5], outcomes: ["Player 1", "Player 2"], settlement: "Handicap applied to the sets won.", live: true, cashout: true },
+  { key: "tn_game_hcp", name: "Game handicap", group: "handicap", shape: "line", period: "FT", outcomes: ["Player 1", "Player 2"], settlement: "Handicap applied to total games won.", live: true, cashout: true },
+  { key: "tn_total_games", name: "Total games", group: "goals", shape: "line", period: "FT", outcomes: ["Over", "Under"], settlement: "Games played across the whole match.", live: true, cashout: true },
+  { key: "tn_correct_sets", name: "Correct set score", group: "score", shape: "list", period: "FT", outcomes: ["2-0", "2-1", "1-2", "0-2"], settlement: "Exact set scoreline.", live: true, cashout: true },
+  { key: "tn_set_winner", name: "Set winner", group: "halves", shape: "2way", period: "SET", outcomes: ["Player 1", "Player 2"], settlement: "Winner of the nominated set.", live: true, cashout: true },
+  { key: "tn_tiebreak", name: "Tie-break in match", group: "specials", shape: "2way", period: "FT", outcomes: ["Yes", "No"], settlement: "At least one set decided by a tie-break.", live: true, cashout: true },
+  { key: "tn_break_serve", name: "Break of serve in set", group: "specials", shape: "2way", period: "SET", outcomes: ["Yes", "No"], settlement: "At least one service break in the nominated set.", live: true, cashout: false },
+];
+
+/* ------------------------------------------------------------------ */
+/* Cross-sport bet types (how selections are combined)                 */
+/* ------------------------------------------------------------------ */
+
+export const BET_TYPES = [
+  { key: "single", name: "Single", legs: [1, 1], note: "One selection." },
+  { key: "multiple", name: "Accumulator", legs: [2, 30], note: "All legs must win. Odds multiply." },
+  { key: "system", name: "System", legs: [3, 12], note: "Combinations of legs, e.g. 2/3 or 3/5. Partial returns possible." },
+  { key: "trixie", name: "Trixie", legs: [3, 3], note: "3 doubles + 1 treble across 3 selections." },
+  { key: "patent", name: "Patent", legs: [3, 3], note: "3 singles + 3 doubles + 1 treble." },
+  { key: "yankee", name: "Yankee", legs: [4, 4], note: "6 doubles + 4 trebles + 1 fourfold." },
+  { key: "lucky15", name: "Lucky 15", legs: [4, 4], note: "Yankee plus 4 singles." },
+  { key: "lucky31", name: "Lucky 31", legs: [5, 5], note: "31 bets across 5 selections." },
+  { key: "lucky63", name: "Lucky 63", legs: [6, 6], note: "63 bets across 6 selections." },
+  { key: "heinz", name: "Heinz", legs: [6, 6], note: "57 bets across 6 selections." },
+  { key: "goliath", name: "Goliath", legs: [8, 8], note: "247 bets across 8 selections." },
+  { key: "chain", name: "Chain", legs: [2, 20], note: "Sequential singles, each staked from the previous return." },
+  { key: "bet_builder", name: "Bet builder", legs: [2, 12], note: "Correlated legs from one match, priced jointly." },
+] as const;
+
+/* ------------------------------------------------------------------ */
+/* Platform features that sit alongside the markets                    */
+/* ------------------------------------------------------------------ */
+
+export const PLATFORM_FEATURES = [
+  { key: "cashout", name: "Cash out", note: "Full and partial. Suspend during price changes and disable on markets flagged cashout: false." },
+  { key: "edit_bet", name: "Edit bet", note: "Swap or remove a leg on an unsettled accumulator, repriced at current odds." },
+  { key: "booking_code", name: "Booking code", note: "Shareable 6-character slip code. The core social loop in Nigeria — treat it as a first-class object, not a URL parameter." },
+  { key: "acca_boost", name: "Accumulator bonus", note: "Percentage uplift by leg count, e.g. +5% at 5 legs rising to +170% at 20." },
+  { key: "one_cut", name: "One-cut / acca insurance", note: "Refund as bonus if exactly one leg of a qualifying acca loses." },
+  { key: "early_payout", name: "2-up early payout", note: "Settle a 1X2 single as a win when the team goes two goals clear, regardless of the final score." },
+  { key: "flash_freeze", name: "Odds freeze", note: "Lock a price for a short window before confirmation." },
+  { key: "jackpot", name: "Jackpot pools", note: "Fixed 1X2 slates, typically 5 to 17 games, with consolation tiers." },
+  { key: "virtuals", name: "Virtual sports", note: "RNG-driven football, racing and instant games. Separate settlement path from live sport." },
+  { key: "live_stream", name: "Live streaming", note: "Geo-gated by rights territory. Bandwidth-cheap fallback: animated match tracker." },
+] as const;
+
+/* ------------------------------------------------------------------ */
+/* Helpers                                                             */
+/* ------------------------------------------------------------------ */
+
+export const ALL_FOOTBALL_GROUPS: { key: Group; label: string }[] = [
+  { key: "main", label: "Main" },
+  { key: "goals", label: "Goals" },
+  { key: "handicap", label: "Handicap" },
+  { key: "halves", label: "Halves" },
+  { key: "combos", label: "Combos" },
+  { key: "score", label: "Correct score" },
+  { key: "scorers", label: "Goalscorers" },
+  { key: "team", label: "Team totals" },
+  { key: "corners", label: "Corners" },
+  { key: "cards", label: "Cards" },
+  { key: "player", label: "Player props" },
+  { key: "timing", label: "Timing" },
+  { key: "method", label: "Method" },
+  { key: "specials", label: "Specials" },
+  { key: "outright", label: "Outrights" },
+];
+
+export const byGroup = (markets: Market[], group: Group) =>
+  markets.filter((m) => m.group === group);
+
+/** Rough selection count — what you show as "+184" on a fixture card. */
+export const countSelections = (markets: Market[]) =>
+  markets.reduce((n, m) => {
+    if (m.lines && m.outcomes) return n + m.lines.length * m.outcomes.length;
+    if (m.lines) return n + m.lines.length * 2;
+    if (m.outcomes) return n + m.outcomes.length;
+    if (m.shape === "grid") return n + 40;
+    if (m.shape === "player") return n + 30;
+    return n + 2;
+  }, 0);
